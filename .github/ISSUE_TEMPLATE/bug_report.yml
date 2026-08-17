@@ -25,7 +25,7 @@ body:
     id: version
     attributes:
       label: $IMPC!TYDOWNLOADER version
-      placeholder: 4.3.0
+      placeholder: 4.3.1
     validations:
       required: true
   - type: textarea

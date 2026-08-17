@@ -1,6 +1,6 @@
 # $IMPC!TYDOWNLOADER
 
-[![Userscript version](https://img.shields.io/badge/userscript-v4.3.0-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
+[![Userscript version](https://img.shields.io/badge/userscript-v4.3.1-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
 [![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue.svg)](LICENSE)
 [![Validation](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml/badge.svg)](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml)
 
@@ -53,9 +53,9 @@ A full-width progress bar stays fixed to the bottom of the screen and combines e
 
 ### Create performer folders
 
-Enable **Performer folder** in download options.
+Open the gear menu and click **Create directory**. This enables **Performer folder** automatically and opens the destination picker immediately.
 
-- **Chrome / Edge:** on the first download, choose the parent destination—normally your Downloads folder. The script creates the performer directory inside it.
+- **Chrome / Edge:** choose the parent destination—normally your Downloads folder. The script creates or reuses one performer directory inside it and shows **Ready** before downloading.
 - **Other browsers or canceled picker:** the script downloads a ZIP whose root directory is the performer name, preserving the folder when extracted.
 
 Example output:

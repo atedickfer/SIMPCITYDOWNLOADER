@@ -4,7 +4,7 @@
 // @namespace https://github.com/atedickfer/SIMPCITYDOWNLOADER
 // @author atedickfer
 // @description $IMPC!TYDOWNLOADER downloads images and videos from XenForo posts
-// @version 4.3.0
+// @version 4.3.1
 // @icon https://simp4.cuckcapital.cr/simpcityIcon192.png
 // @license WTFPL; http://www.wtfpl.net/txt/copying/
 // @match https://simpcity.cr/threads/*
@@ -288,7 +288,6 @@ const settings = {
 const XFPD_DIRECTORY_DB = 'xfpd_directory_handles_v1';
 const XFPD_DIRECTORY_STORE = 'performer_folders';
 const xfpdPerformerHandles = new Map();
-const xfpdDirectoryPickerDeclined = new Set();
 
 const xfpdSanitizeDirectoryName = value => {
     let name = String(value || 'Performer').replace(/\s+/g, ' ').trim();
@@ -305,6 +304,17 @@ const xfpdSanitizeDirectoryName = value => {
 
 const xfpdDirectoryKey = performerName =>
     `${location.hostname}:${String(performerName || '').normalize('NFKC').toLocaleLowerCase()}`;
+
+// File System Access API picker IDs must be no longer than 32 characters and
+// may contain only ASCII letters, numbers, underscores, and hyphens.
+const xfpdDirectoryPickerId = performerKey => {
+    let hash = 2166136261;
+    for (const char of String(performerKey || 'performer')) {
+        hash ^= char.codePointAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `xfpd-performer-${(hash >>> 0).toString(36)}`;
+};
 
 const xfpdOpenDirectoryDb = () => new Promise((resolve, reject) => {
     try {
@@ -352,6 +362,20 @@ const xfpdStoreDirectory = async (key, handle) => {
     }
 };
 
+const xfpdPreloadPerformerFolder = async () => {
+    try {
+        const performerName = xfpdSanitizeDirectoryName(parsers.thread.parsePerformerName());
+        const performerKey = xfpdDirectoryKey(performerName);
+        if (xfpdPerformerHandles.has(performerKey)) return;
+        const storedHandle = await xfpdGetStoredDirectory(performerKey);
+        if (storedHandle && !xfpdPerformerHandles.has(performerKey)) {
+            xfpdPerformerHandles.set(performerKey, storedHandle);
+        }
+    } catch (e) {
+        // Directory persistence is an enhancement; a direct picker remains available.
+    }
+};
+
 const xfpdGetDirectoryPermission = async handle => {
     try {
         if (typeof handle.queryPermission !== 'function') return 'granted';
@@ -365,31 +389,33 @@ const xfpdGetDirectoryPermission = async handle => {
     }
 };
 
-const xfpdPreparePerformerFolder = async (uiSettings, statusEl = null) => {
+const xfpdPreparePerformerFolder = async (uiSettings, statusEl = null, { forcePicker = false } = {}) => {
     if (!uiSettings || !uiSettings.createPerformerFolder) {
         if (uiSettings) {
             delete uiSettings._xfpdFolderMode;
             delete uiSettings._xfpdPerformerDirectoryHandle;
+            delete uiSettings._xfpdFolderError;
         }
         return 'off';
     }
 
     const performerName = xfpdSanitizeDirectoryName(parsers.thread.parsePerformerName());
     const performerKey = xfpdDirectoryKey(performerName);
-    let performerHandle = xfpdPerformerHandles.get(performerKey) || null;
-    if (!performerHandle) performerHandle = await xfpdGetStoredDirectory(performerKey);
+    let performerHandle = forcePicker ? null : xfpdPerformerHandles.get(performerKey) || null;
 
     if (performerHandle && await xfpdGetDirectoryPermission(performerHandle) === 'granted') {
         xfpdPerformerHandles.set(performerKey, performerHandle);
         uiSettings._xfpdFolderMode = 'native';
         uiSettings._xfpdPerformerDirectoryHandle = performerHandle;
+        delete uiSettings._xfpdFolderError;
         return 'native';
     }
 
     const picker = window.showDirectoryPicker || globalThis.showDirectoryPicker;
-    if (typeof picker !== 'function' || xfpdDirectoryPickerDeclined.has(performerKey)) {
+    if (typeof picker !== 'function') {
         uiSettings._xfpdFolderMode = 'archive';
         delete uiSettings._xfpdPerformerDirectoryHandle;
+        uiSettings._xfpdFolderError = 'This browser cannot create folders here. Chrome or Edge is required.';
         return 'archive';
     }
 
@@ -399,7 +425,7 @@ const xfpdPreparePerformerFolder = async (uiSettings, statusEl = null) => {
             statusEl.closest?.('.xfpd-progress')?.style.setProperty('display', 'block');
         }
         const selectedHandle = await picker.call(window, {
-            id: `xfpd-${performerKey.replace(/[^a-z0-9_-]+/gi, '-').slice(-80)}`,
+            id: xfpdDirectoryPickerId(performerKey),
             mode: 'readwrite',
             startIn: 'downloads',
         });
@@ -416,12 +442,15 @@ const xfpdPreparePerformerFolder = async (uiSettings, statusEl = null) => {
         await xfpdStoreDirectory(performerKey, performerHandle);
         uiSettings._xfpdFolderMode = 'native';
         uiSettings._xfpdPerformerDirectoryHandle = performerHandle;
+        delete uiSettings._xfpdFolderError;
         return 'native';
     } catch (e) {
-        xfpdDirectoryPickerDeclined.add(performerKey);
         uiSettings._xfpdFolderMode = 'archive';
         delete uiSettings._xfpdPerformerDirectoryHandle;
-        console.info('[XFPD] Directory picker unavailable or canceled; using a performer-rooted ZIP.');
+        uiSettings._xfpdFolderError = e?.name === 'AbortError'
+            ? 'Folder selection was canceled. Click Create directory to try again.'
+            : `Could not create the folder${e?.message ? `: ${e.message}` : '.'}`;
+        console.info('[XFPD] Directory picker failed; using a performer-rooted ZIP.', e);
         return 'archive';
     }
 };
@@ -2045,6 +2074,37 @@ const styles = {
 }
 .xfpd-toggle input { margin: 0; accent-color: #3db7c7; }
 .xfpd-toggle.is-disabled { opacity: .45; pointer-events: none; }
+.xfpd-directory-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.xfpd-directory-btn {
+  appearance: none;
+  padding: 8px 12px;
+  border: 1px solid rgba(61,183,199,.5);
+  border-radius: 9px;
+  background: rgba(61,183,199,.13);
+  color: #54c9d8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+.xfpd-directory-btn:hover { background: rgba(61,183,199,.21); }
+.xfpd-directory-btn:disabled { cursor: wait; opacity: .58; }
+.xfpd-directory-status {
+  min-width: 0;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: .62;
+  overflow-wrap: anywhere;
+}
+.xfpd-directory-status.is-ready { color: #54c9d8; opacity: 1; }
+.xfpd-directory-status.is-error { color: #ff8f84; opacity: 1; }
 .xfpd-hosts-head {
   display: flex;
   align-items: center;
@@ -2713,6 +2773,10 @@ const ui = {
               ${ui.forms.config.post.createSkipDownloadCheckbox(postId, settings.skipDownload)}
               ${ui.forms.config.post.createVerifyBunkrLinksCheckbox(postId, settings.verifyBunkrLinks)}
             </div>
+            <div class="xfpd-directory-row">
+              <button type="button" id="xfpd-create-directory-${postId}" class="xfpd-directory-btn">Create directory</button>
+              <span id="xfpd-directory-status-${postId}" class="xfpd-directory-status">Choose where the performer folder should live.</span>
+            </div>
           </div>
           `;
 
@@ -2771,6 +2835,54 @@ const ui = {
                             let updateSettings = true;
 
                             const persist = () => xfpdPersistUiSettings(settings);
+
+                            const performerFolderEl = h.element(`#settings-${postId}-performer-folder`);
+                            const directoryButton = h.element(`#xfpd-create-directory-${postId}`);
+                            const directoryStatus = h.element(`#xfpd-directory-status-${postId}`);
+                            const performerName = xfpdSanitizeDirectoryName(parsers.thread.parsePerformerName());
+                            const performerKey = xfpdDirectoryKey(performerName);
+                            const setDirectoryUi = (state, message) => {
+                                if (directoryStatus) {
+                                    directoryStatus.textContent = message;
+                                    directoryStatus.classList.toggle('is-ready', state === 'ready');
+                                    directoryStatus.classList.toggle('is-error', state === 'error');
+                                }
+                                if (directoryButton) {
+                                    directoryButton.textContent = state === 'ready' ? 'Change directory' : 'Create directory';
+                                }
+                            };
+
+                            const cachedPerformerHandle = xfpdPerformerHandles.get(performerKey);
+                            if (cachedPerformerHandle && !settings._xfpdPerformerDirectoryHandle) {
+                                settings._xfpdFolderMode = 'native';
+                                settings._xfpdPerformerDirectoryHandle = cachedPerformerHandle;
+                            }
+                            if (settings._xfpdFolderMode === 'native' && settings._xfpdPerformerDirectoryHandle) {
+                                setDirectoryUi('ready', `Ready: ${performerName}`);
+                            }
+
+                            directoryButton?.addEventListener('click', async e => {
+                                e.preventDefault();
+                                e.stopPropagation();
+
+                                settings.createPerformerFolder = true;
+                                if (performerFolderEl) {
+                                    performerFolderEl.checked = true;
+                                    syncToggleClass(performerFolderEl);
+                                }
+                                persist();
+
+                                directoryButton.disabled = true;
+                                setDirectoryUi('working', `Creating “${performerName}”…`);
+                                const mode = await xfpdPreparePerformerFolder(settings, null, { forcePicker: true });
+                                directoryButton.disabled = false;
+
+                                if (mode === 'native') {
+                                    setDirectoryUi('ready', `Ready: ${performerName}`);
+                                } else {
+                                    setDirectoryUi('error', settings._xfpdFolderError || 'Could not create the directory. Click to try again.');
+                                }
+                            });
 
                             if (settings.skipDownload) {
                                 const flattenEl0 = h.element(`#settings-${postId}-flatten`);
@@ -2871,9 +2983,14 @@ const ui = {
                                 }
                             });
 
-                            h.element(`#settings-${postId}-performer-folder`).addEventListener('change', e => {
+                            performerFolderEl.addEventListener('change', e => {
                                 settings.createPerformerFolder = e.target.checked;
                                 syncToggleClass(e.target);
+                                if (!e.target.checked) {
+                                    delete settings._xfpdFolderMode;
+                                    delete settings._xfpdPerformerDirectoryHandle;
+                                    setDirectoryUi('idle', 'Choose where the performer folder should live.');
+                                }
                                 persist();
                                 if (updateSettings) {
                                     setPrevSettings(settings);
@@ -6328,6 +6445,11 @@ const xfpdCreatePageDrawer = () => {
     const xfpdInitialize = async () => {
         if (document.documentElement.dataset.xfpdInitialized === 'true') return;
         document.documentElement.dataset.xfpdInitialized = 'true';
+
+        // Warm the previously selected handle before the next user click. If no
+        // handle exists, download clicks reach showDirectoryPicker immediately
+        // while Chrome's transient user activation is still valid.
+        void xfpdPreloadPerformerFolder();
 
         // RedGifs authentication is optional. Never block the forum controls on a
         // cross-origin request that can stall indefinitely in a userscript manager.

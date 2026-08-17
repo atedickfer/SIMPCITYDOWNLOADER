@@ -64,6 +64,8 @@
     window.GM_openInTab = () => ({ close() {} });
     window.__nativeWrites = [];
     window.__pickerCalls = 0;
+    window.__pickerOptions = [];
+    window.__pickerFailuresRemaining = new URLSearchParams(location.search).has('picker-error') ? 1 : 0;
     class FixtureFileHandle {
       constructor(path) { this.path = path; }
       async createWritable() {
@@ -99,8 +101,16 @@
     window.__fixtureDownloadRoot = new FixtureDirectoryHandle('', 'Downloads');
     window.__fixturePerformerRoot = new FixtureDirectoryHandle('Fixture Performer', 'Fixture Performer');
     if (!new URLSearchParams(location.search).has('portable')) {
-      window.showDirectoryPicker = async () => {
+      window.showDirectoryPicker = async options => {
         window.__pickerCalls += 1;
+        window.__pickerOptions.push(options);
+        if (options?.id && (options.id.length > 32 || !/^[A-Za-z0-9_-]+$/.test(options.id))) {
+          throw new TypeError('Invalid picker id');
+        }
+        if (window.__pickerFailuresRemaining > 0) {
+          window.__pickerFailuresRemaining -= 1;
+          throw new DOMException('Fixture picker failure', 'SecurityError');
+        }
         return new URLSearchParams(location.search).has('select-performer')
           ? window.__fixturePerformerRoot
           : window.__fixtureDownloadRoot;

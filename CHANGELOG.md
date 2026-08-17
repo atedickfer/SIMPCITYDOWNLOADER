@@ -2,6 +2,12 @@
 
 All notable changes to this repository are documented here.
 
+## 4.3.1
+
+- Added a literal **Create directory** button to each post's download options.
+- Fixed Chrome directory-picker failures caused by invalid IDs longer than 32 characters.
+- Added visible folder-ready and retryable error states instead of silently disabling the picker.
+
 ## 4.3.0
 
 - Renamed the userscript and installable file to `$IMPC!TYDOWNLOADER`.
