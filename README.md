@@ -1,6 +1,6 @@
 # $IMPC!TYDOWNLOADER
 
-[![Userscript version](https://img.shields.io/badge/userscript-v4.3.1-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
+[![Userscript version](https://img.shields.io/badge/userscript-v4.3.2-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
 [![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue.svg)](LICENSE)
 [![Validation](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml/badge.svg)](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml)
 

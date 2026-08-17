@@ -20,6 +20,9 @@ const openFixture = async query => {
 try {
     {
         const { context, page, errors } = await openFixture('');
+        const sha256 = await page.evaluate(() => globalThis.eval('xfpdSha256("abc")'));
+        assert.equal(sha256, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+
         const button = page.locator('[id^="xfpd-create-directory-"]');
         await button.click();
         await page.waitForFunction(() => document.querySelector('[id^="xfpd-directory-status-"]')?.classList.contains('is-ready'));

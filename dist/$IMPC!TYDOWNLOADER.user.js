@@ -1,10 +1,9 @@
-// noinspection SpellCheckingInspection,JSUnresolvedVariable,JSUnresolvedFunction,TypeScriptUMDGlobal,JSUnusedGlobalSymbols
 // ==UserScript==
 // @name $IMPC!TYDOWNLOADER
 // @namespace https://github.com/atedickfer/SIMPCITYDOWNLOADER
 // @author atedickfer
 // @description $IMPC!TYDOWNLOADER downloads images and videos from XenForo posts
-// @version 4.3.1
+// @version 4.3.2
 // @icon https://simp4.cuckcapital.cr/simpcityIcon192.png
 // @license WTFPL; http://www.wtfpl.net/txt/copying/
 // @match https://simpcity.cr/threads/*
@@ -19,7 +18,6 @@
 // @require https://unpkg.com/tippy.js@6
 // @require https://unpkg.com/file-saver@2.0.4/dist/FileSaver.min.js
 // @require https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js
-// @require https://raw.githubusercontent.com/geraintluff/sha256/gh-pages/sha256.min.js
 // @connect self
 // @connect simpcity.su
 // @connect coomer.st
@@ -161,6 +159,14 @@ window.isFF = typeof InstallTrigger !== 'undefined';
 window.logs = [];
 
 const XFPD_SETTINGS_KEY = 'xfpd_post_settings_v4';
+
+const xfpdSha256 = async value => {
+    const bytes = new TextEncoder().encode(String(value ?? ''));
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)]
+        .map(byte => byte.toString(16).padStart(2, '0'))
+        .join('');
+};
 
 const log = {
     /**
@@ -4201,7 +4207,7 @@ const resolvers = [
                 }
                         log.host.info(postId, `::Trying with ${spoilers.length} available password(s)::`, 'gofile.io');
                     for (const spoiler of spoilers) {
-                        const hash = sha256(spoiler);
+                        const hash = await xfpdSha256(spoiler);
                     const attempt = await apiContents(id, hash);
                     if (attempt && attempt.status === 'ok') {
                             log.host.info(postId, `::Successfully authenticated with:: ${spoiler}`, 'gofile.io');

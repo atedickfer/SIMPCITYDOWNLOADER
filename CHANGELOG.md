@@ -2,6 +2,12 @@
 
 All notable changes to this repository are documented here.
 
+## 4.3.2
+
+- Made the userscript metadata block begin at the first byte for userscript-manager compatibility.
+- Replaced the unapproved GitHub SHA-256 dependency with the browser's built-in Web Crypto API.
+- Added validation that prevents either Greasy Fork publishing issue from returning.
+
 ## 4.3.1
 
 - Added a literal **Create directory** button to each post's download options.
