@@ -95,6 +95,40 @@ try {
         await context.close();
     }
 
+    for (const mode of [
+        { id: 'xfpd-thread-images', label: 'photos', expectedImages: 3, expectedVideos: 0 },
+        { id: 'xfpd-thread-videos', label: 'videos', expectedImages: 0, expectedVideos: 3 },
+        { id: 'xfpd-thread-both', label: 'photos and videos', expectedImages: 3, expectedVideos: 3 },
+    ]) {
+        const { context, page, errors } = await openFixture('');
+        await page.locator('#download-thread').click();
+        await page.locator(`#${mode.id}`).click();
+        await page.waitForFunction(() => document.querySelector('#xfpd-thread-progress .xfpd-progress-status')?.textContent.startsWith('Complete:'), null, { timeout: 30_000 });
+
+        const threadState = await page.evaluate(() => ({
+            fetchedPages: window.__threadPageFetches,
+            pickerCalls: window.__pickerCalls,
+            zipEntries: window.__zipEntries,
+            nativePaths: window.__nativeWrites.map(write => write.path),
+            status: document.querySelector('#xfpd-thread-progress .xfpd-progress-status')?.textContent.trim(),
+            pageBadge: document.querySelector('#xfpd-thread-pages')?.textContent.trim(),
+            buttonsEnabled: [...document.querySelectorAll('.xfpd-thread-actions button')].every(button => !button.disabled),
+        }));
+
+        const imageEntries = threadState.zipEntries.filter(path => /\.jpe?g$/i.test(path));
+        const videoEntries = threadState.zipEntries.filter(path => /\.mp4$/i.test(path));
+        assert.deepEqual(threadState.fetchedPages, [2, 3]);
+        assert.equal(threadState.pickerCalls, 1, `${mode.label}: performer directory picker should open once`);
+        assert.equal(new Set(imageEntries).size, mode.expectedImages, `${mode.label} image count`);
+        assert.equal(new Set(videoEntries).size, mode.expectedVideos, `${mode.label} video count`);
+        assert.match(threadState.status, new RegExp(`Complete: ${mode.expectedImages + mode.expectedVideos} of ${mode.expectedImages + mode.expectedVideos} ${mode.label}`));
+        assert.equal(threadState.pageBadge, '3 pages');
+        assert.equal(threadState.buttonsEnabled, true);
+        assert.ok(threadState.nativePaths.every(path => path.startsWith('Fixture Performer/')));
+        assert.deepEqual(errors, []);
+        await context.close();
+    }
+
     console.log('Browser UI flow verified.');
 } finally {
     await browser.close();

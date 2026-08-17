@@ -2,6 +2,13 @@
 
 All notable changes to this repository are documented here.
 
+## 4.4.0
+
+- Added entire-performer-thread downloads across every XenForo pagination page.
+- Added separate **All photos**, **All videos**, and **Photos + videos** thread actions.
+- Added signed-in page crawling, duplicate post/link removal, bounded page discovery, and sequential post processing.
+- Kept the global progress bar active for the full multi-page operation.
+
 ## 4.3.2
 
 - Made the userscript metadata block begin at the first byte for userscript-manager compatibility.

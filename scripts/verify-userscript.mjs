@@ -8,7 +8,7 @@ const requiredMetadata = [
     '// @name $IMPC!TYDOWNLOADER',
     '// @namespace https://github.com/atedickfer/SIMPCITYDOWNLOADER',
     '// @author atedickfer',
-    '// @version 4.3.2',
+    '// @version 4.4.0',
     '// @grant GM_xmlhttpRequest',
     '// @grant GM_download',
 ];

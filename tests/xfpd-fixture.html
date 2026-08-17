@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>$IMPC!TYDOWNLOADER XenForo fixture</title>
+  <link rel="canonical" href="https://simpcity.cr/threads/fixture.1/">
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { min-height: 100vh; margin: 0; background: radial-gradient(circle at 16% 0%, #22313a 0, #12171c 34%, #0d1115 72%); color: #e8edf0; }
@@ -20,12 +21,62 @@
     .message-body { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
     .message-body > a { padding: 30px 18px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: linear-gradient(145deg, rgba(61,183,199,.13), rgba(255,255,255,.025)); color: #dce8ec; text-align: center; text-decoration: none; }
     footer { padding: 0 22px 18px; color: #748089; font-size: 11px; }
+    .pageNav { display: flex; justify-content: center; gap: 8px; padding: 18px; }
+    .pageNav a { color: #65d4e2; }
   </style>
   <script>
+    window.__threadPageFetches = [];
+    window.__fixtureThreadPage = pageNumber => {
+      const media = pageNumber === 2
+        ? `
+          <a href="/attachments/fixture-image.jpg">Duplicate fixture image</a>
+          <a href="/attachments/page-2-image.jpg">Page 2 image</a>
+          <a href="/data/video/page-2-video.mp4">Page 2 video</a>`
+        : `
+          <a href="/attachments/page-3-image.jpg">Page 3 image</a>
+          <a href="/data/video/page-3-video.mp4">Page 3 video</a>`;
+      const postId = pageNumber === 2 ? '456' : '789';
+      const postNumber = pageNumber === 2 ? '2' : '3';
+      return `<!doctype html>
+        <html><head><link rel="canonical" href="https://simpcity.cr/threads/fixture.1/page-${pageNumber}"></head><body>
+          <nav class="pageNav">
+            <a href="https://simpcity.cr/threads/fixture.1/">1</a>
+            <a href="https://simpcity.cr/threads/fixture.1/page-2">2</a>
+            <a href="https://simpcity.cr/threads/fixture.1/page-3">3</a>
+          </nav>
+          <article class="message" id="post-${postId}" data-content="post-${postId}">
+            <header class="message-attribution">
+              <ul class="message-attribution-main"><li>Fixture user</li></ul>
+              <ul class="message-attribution-opposite"><li><a href="https://simpcity.cr/threads/fixture.1/post-${postId}">#${postNumber}</a></li></ul>
+            </header>
+            <div class="message-content"><div class="message-userContent"><div class="message-body">${media}</div></div></div>
+            <footer><span class="has-reaction">Reacted</span></footer>
+          </article>
+        </body></html>`;
+    };
     window.GM_xmlhttpRequest = options => {
       const request = { abort() {} };
       const fixtureDelay = new URLSearchParams(location.search).has('slow') ? 1200 : 0;
       setTimeout(() => {
+        const threadPageMatch = /simpcity\.cr\/threads\/fixture\.1\/page-(\d+)/i.exec(String(options.url));
+        if (threadPageMatch) {
+          const pageNumber = Number(threadPageMatch[1]);
+          const html = window.__fixtureThreadPage(pageNumber);
+          const dom = new DOMParser().parseFromString(html, 'text/html');
+          window.__threadPageFetches.push(pageNumber);
+          const headers = 'content-type: text/html\r\n';
+          options.onreadystatechange?.({ readyState: 2, status: 200, responseHeaders: headers, finalUrl: options.url });
+          options.onload?.({
+            readyState: 4,
+            status: 200,
+            response: dom,
+            responseText: html,
+            responseHeaders: headers,
+            finalUrl: options.url,
+          });
+          return;
+        }
+
         if (!/\/(?:attachments|data\/video)\//.test(String(options.url))) {
           options.onerror?.(new Error('fixture blocks external network'));
           return;
@@ -146,6 +197,11 @@
     <h1 class="p-title-value"><span class="label label--accent">OnlyFans</span> Fixture Performer</h1>
     <div class="buttonGroup"></div>
   </header>
+  <nav class="pageNav">
+    <a href="https://simpcity.cr/threads/fixture.1/">1</a>
+    <a href="https://simpcity.cr/threads/fixture.1/page-2">2</a>
+    <a href="https://simpcity.cr/threads/fixture.1/page-3">3</a>
+  </nav>
 
   <!-- A promoted/system message with non-post markup must not abort initialization. -->
   <article class="message" id="promoted-message">

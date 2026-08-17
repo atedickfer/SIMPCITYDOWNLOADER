@@ -3,7 +3,7 @@
 // @namespace https://github.com/atedickfer/SIMPCITYDOWNLOADER
 // @author atedickfer
 // @description $IMPC!TYDOWNLOADER downloads images and videos from XenForo posts
-// @version 4.3.2
+// @version 4.4.0
 // @icon https://simp4.cuckcapital.cr/simpcityIcon192.png
 // @license WTFPL; http://www.wtfpl.net/txt/copying/
 // @match https://simpcity.cr/threads/*
@@ -627,17 +627,138 @@ const xfpdMediaKindForResolved = resource => {
 
 const xfpdHostsForMedia = (hostsToFilter, kind) => (hostsToFilter || []).map(host => {
     const category = String(host.category || '').toLowerCase();
-    if (category.includes(kind)) return { ...host, resources: [...host.resources], enabled: true };
-    if (category.includes(kind === 'image' ? 'video' : 'image')) return null;
+    const requestedKinds = kind === 'both' ? ['image', 'video'] : [kind];
+    if (requestedKinds.some(requestedKind => category.includes(requestedKind))) {
+        return { ...host, resources: [...host.resources], enabled: true };
+    }
+    if (category.includes('image') || category.includes('video')) return null;
+    if (/document|compressed|archive/.test(category)) return null;
 
     // Mixed/unknown hosts (attachments, Bunkr, GoFile, etc.) keep URLs known to
     // be the requested type plus extensionless URLs that must be resolved first.
     const resources = host.resources.filter(resource => {
         const detected = xfpdMediaKindFromText(resource);
-        return detected === kind || detected === null;
+        return detected === null || requestedKinds.includes(detected);
     });
     return resources.length ? { ...host, resources, enabled: true } : null;
 }).filter(Boolean);
+
+const XFPD_MAX_THREAD_PAGES = 500;
+
+const xfpdThreadBaseUrl = (doc = document) => {
+    const canonical = doc.querySelector?.('link[rel="canonical"]')?.getAttribute('href');
+    const pageLink = doc.querySelector?.('.pageNav a[href*="/threads/"], a.pageNav-jump[href*="/threads/"]')?.getAttribute('href');
+    const url = new URL(canonical || pageLink || location.href, location.href);
+    url.hash = '';
+    url.search = '';
+    url.pathname = url.pathname.replace(/\/page-\d+\/?$/i, '').replace(/\/+$/, '');
+    return url.href;
+};
+
+const xfpdThreadPageNumber = (url, baseUrl) => {
+    try {
+        const candidate = new URL(url, baseUrl);
+        const base = new URL(baseUrl);
+        if (candidate.origin !== base.origin) return null;
+        const basePath = base.pathname.replace(/\/+$/, '');
+        const candidatePath = candidate.pathname.replace(/\/+$/, '');
+        if (candidatePath === basePath) return 1;
+        const match = /\/page-(\d+)$/i.exec(candidatePath);
+        if (!match || candidatePath.replace(/\/page-\d+$/i, '') !== basePath) return null;
+        const pageNumber = Number(match[1]);
+        return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
+    } catch (e) {
+        return null;
+    }
+};
+
+const xfpdThreadPageUrl = (baseUrl, pageNumber) =>
+    pageNumber <= 1 ? baseUrl : `${baseUrl.replace(/\/+$/, '')}/page-${pageNumber}`;
+
+const xfpdLastThreadPage = (doc, baseUrl) => {
+    let lastPage = 1;
+    const links = doc.querySelectorAll?.('.pageNav a[href], a.pageNav-jump[href], a[rel="next"][href]') || [];
+    links.forEach(link => {
+        const pageNumber = xfpdThreadPageNumber(link.getAttribute('href'), baseUrl);
+        if (pageNumber) lastPage = Math.max(lastPage, pageNumber);
+    });
+    const currentText = doc.querySelector?.('.pageNav-page--current')?.textContent || '';
+    const currentNumber = Number(String(currentText).replace(/\D+/g, ''));
+    if (Number.isFinite(currentNumber)) lastPage = Math.max(lastPage, currentNumber);
+    return Math.min(XFPD_MAX_THREAD_PAGES, lastPage);
+};
+
+const xfpdCollectThreadMedia = async onProgress => {
+    const baseUrl = xfpdThreadBaseUrl();
+    const currentPage = xfpdThreadPageNumber(location.href, baseUrl) || 1;
+    let lastPage = xfpdLastThreadPage(document, baseUrl);
+    const entries = [];
+    const failedPages = [];
+    const seenPostIds = new Set();
+
+    for (let pageNumber = 1; pageNumber <= lastPage && pageNumber <= XFPD_MAX_THREAD_PAGES; pageNumber++) {
+        onProgress?.({ pageNumber, lastPage, entries: entries.length });
+        let pageDocument = pageNumber === currentPage ? document : null;
+
+        if (!pageDocument) {
+            try {
+                const response = await h.http.get(
+                    xfpdThreadPageUrl(baseUrl, pageNumber),
+                    {},
+                    { __xfpd_withCredentials: true },
+                );
+                pageDocument = response?.dom;
+                if (!pageDocument && response?.source) {
+                    pageDocument = new DOMParser().parseFromString(response.source, 'text/html');
+                }
+            } catch (e) {
+                pageDocument = null;
+            }
+        }
+
+        if (!pageDocument) {
+            failedPages.push(pageNumber);
+            continue;
+        }
+
+        lastPage = Math.min(
+            XFPD_MAX_THREAD_PAGES,
+            Math.max(lastPage, xfpdLastThreadPage(pageDocument, baseUrl)),
+        );
+
+        const postAttributions = pageDocument.querySelectorAll('.message-attribution-opposite');
+        postAttributions.forEach(post => {
+            try {
+                const parsedPost = parsers.thread.parsePost(post);
+                if (seenPostIds.has(parsedPost.postId)) return;
+                seenPostIds.add(parsedPost.postId);
+                parsedPost.pageNumber = pageNumber;
+                const parsedHosts = parsers.hosts.parseHosts(parsedPost.content);
+                if (parsedHosts.length) entries.push({ parsedPost, parsedHosts });
+            } catch (e) {
+                // Promoted/system posts do not have normal post identifiers or media.
+            }
+        });
+    }
+
+    return { baseUrl, entries, failedPages, pagesScanned: lastPage };
+};
+
+const xfpdThreadEntriesForMedia = (entries, kind) => {
+    const seenResources = new Set();
+    return entries.map(entry => {
+        const hosts = xfpdHostsForMedia(entry.parsedHosts, kind).map(host => ({
+            ...host,
+            resources: host.resources.filter(resource => {
+                const key = String(resource || '').replace(/&amp;/g, '&').replace(/#.*$/, '').trim();
+                if (!key || seenResources.has(key)) return false;
+                seenResources.add(key);
+                return true;
+            }),
+        })).filter(host => host.resources.length);
+        return { ...entry, hosts };
+    }).filter(entry => entry.hosts.length);
+};
 
 const xfpdDefaultUiSettings = () => ({
     zipped: true,
@@ -2359,6 +2480,47 @@ html[data-color-scheme="light"] .xfpd-drawer {
   gap: 10px;
   padding: 12px 18px;
 }
+.xfpd-thread-panel {
+  margin: 0 12px 12px;
+  padding: 12px;
+  border: 1px solid rgba(61,183,199,.28);
+  border-radius: 14px;
+  background: rgba(61,183,199,.07);
+}
+.xfpd-thread-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.xfpd-thread-title { font-size: 12px; font-weight: 850; }
+.xfpd-thread-hint { margin-top: 3px; font-size: 11px; line-height: 1.35; opacity: .64; }
+.xfpd-thread-pages {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(61,183,199,.15);
+  color: #54c9d8;
+  font-size: 10px;
+  font-weight: 850;
+}
+.xfpd-thread-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.xfpd-thread-actions .xfpd-cta {
+  min-width: 0;
+  padding: 8px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+.xfpd-thread-actions .xfpd-cta:disabled { cursor: wait; opacity: .5; }
+.xfpd-thread-progress .xfpd-progress { margin: 10px 0 0; }
+.xfpd-thread-progress .xfpd-progress-status { word-break: normal; }
 .xfpd-drawer-list {
   flex: 1;
   overflow: auto;
@@ -5528,12 +5690,17 @@ const downloadPost = async (parsedPost, parsedHosts, enabledHostsCB, resolvers, 
     log.post.info(postId, '::Url resolution completed::', postNumber);
 
     const mediaFilter = postSettings._xfpdMediaFilter;
-    if (mediaFilter === 'image' || mediaFilter === 'video') {
+    if (mediaFilter === 'image' || mediaFilter === 'video' || mediaFilter === 'both') {
         const beforeMediaFilter = resolved.length;
-        resolved = resolved.filter(resource => xfpdMediaKindForResolved(resource) === mediaFilter);
+        resolved = resolved.filter(resource => {
+            const resolvedKind = xfpdMediaKindForResolved(resource);
+            return mediaFilter === 'both'
+                ? resolvedKind === 'image' || resolvedKind === 'video'
+                : resolvedKind === mediaFilter;
+        });
         log.post.info(
             postId,
-            `::Page ${mediaFilter} filter kept ${resolved.length} of ${beforeMediaFilter} resolved file(s)::`,
+            `::${mediaFilter === 'both' ? 'Image/video' : h.ucFirst(mediaFilter)} filter kept ${resolved.length} of ${beforeMediaFilter} resolved file(s)::`,
             postNumber,
         );
     }
@@ -6374,6 +6541,24 @@ const addDownloadMediaButton = (kind, fileCount) => {
     return button;
 };
 
+const addDownloadThreadButton = pageCount => {
+    const existingButton = document.getElementById('download-thread');
+    if (existingButton) return existingButton;
+
+    const button = document.createElement('a');
+    button.id = 'download-thread';
+    button.href = '#';
+    button.className = 'button--link button rippleButton xfpd-page-btn';
+    button.innerHTML = `<span class="button-text">↓ Entire thread <span class="xfpd-page-count">${pageCount} page${pageCount === 1 ? '' : 's'}</span></span>`;
+    const buttonGroup =
+        h.element('.buttonGroup') ||
+        h.element('.p-title-pageAction') ||
+        h.element('.p-title') ||
+        document.body;
+    buttonGroup.prepend(button);
+    return button;
+};
+
 const xfpdCreateProgressCard = () => {
     const wrap = document.createElement('div');
     wrap.className = 'xfpd-progress';
@@ -6396,8 +6581,8 @@ const xfpdCreatePageDrawer = () => {
     drawer.innerHTML = `
         <div class="xfpd-drawer-head">
             <div>
-                <div class="xfpd-drawer-title">Download this page</div>
-                <div class="xfpd-drawer-sub" id="xfpd-drawer-sub">Select posts with media</div>
+                <div class="xfpd-drawer-title">Download performer media</div>
+                <div class="xfpd-drawer-sub" id="xfpd-drawer-sub">Select posts on this page</div>
             </div>
             <button type="button" class="xfpd-icon-btn" id="xfpd-drawer-close" aria-label="Close">×</button>
         </div>
@@ -6408,6 +6593,21 @@ const xfpdCreatePageDrawer = () => {
             </label>
             <div class="xfpd-post-count" id="xfpd-selected-meta">0 selected</div>
         </div>
+        <section class="xfpd-thread-panel" id="xfpd-thread-panel">
+            <div class="xfpd-thread-panel-head">
+                <div>
+                    <div class="xfpd-thread-title">Entire performer thread</div>
+                    <div class="xfpd-thread-hint">Scans every pagination page, removes duplicate links, then downloads sequentially.</div>
+                </div>
+                <span class="xfpd-thread-pages" id="xfpd-thread-pages">1 page</span>
+            </div>
+            <div class="xfpd-thread-actions">
+                <button type="button" class="xfpd-cta xfpd-cta-secondary" id="xfpd-thread-images">All photos</button>
+                <button type="button" class="xfpd-cta xfpd-cta-secondary" id="xfpd-thread-videos">All videos</button>
+                <button type="button" class="xfpd-cta" id="xfpd-thread-both">Photos + videos</button>
+            </div>
+            <div class="xfpd-thread-progress" id="xfpd-thread-progress"></div>
+        </section>
         <div class="xfpd-drawer-list" id="xfpd-drawer-list"></div>
         <div class="xfpd-drawer-foot">
             <button type="button" class="xfpd-cta xfpd-cta-secondary" id="xfpd-drawer-images">All images</button>
@@ -6575,6 +6775,135 @@ const xfpdCreatePageDrawer = () => {
             }
         });
 
+        const threadBaseUrl = xfpdThreadBaseUrl();
+        const threadPageCount = xfpdLastThreadPage(document, threadBaseUrl);
+        const threadPageBadge = document.getElementById('xfpd-thread-pages');
+        if (threadPageBadge) {
+            threadPageBadge.textContent = `${threadPageCount} page${threadPageCount === 1 ? '' : 's'}`;
+        }
+
+        const btnDownloadThread = addDownloadThreadButton(threadPageCount);
+        const threadProgressUi = xfpdCreateProgressCard();
+        const threadDownloadStatusUi = {
+            status: threadProgressUi.statusText,
+            filePB: threadProgressUi.filePBar,
+            totalPB: threadProgressUi.totalPBar,
+            wrap: threadProgressUi.wrap,
+            split: null,
+        };
+        document.getElementById('xfpd-thread-progress')?.appendChild(threadProgressUi.wrap);
+        const threadButtons = [
+            document.getElementById('xfpd-thread-images'),
+            document.getElementById('xfpd-thread-videos'),
+            document.getElementById('xfpd-thread-both'),
+        ].filter(Boolean);
+        let threadDownloadBusy = false;
+
+        const showThreadStatus = (message, color = '#469cf3') => {
+            h.ui.setElProps(threadProgressUi.statusText, {
+                color,
+                display: 'block',
+                fontWeight: 'bold',
+            });
+            h.ui.setText(threadProgressUi.statusText, message);
+            h.show(threadProgressUi.wrap);
+            h.show(threadProgressUi.statusText);
+        };
+
+        const setThreadButtonsBusy = busy => {
+            threadButtons.forEach(button => { button.disabled = busy; });
+        };
+
+        const startThreadMedia = async kind => {
+            if (threadDownloadBusy) return;
+            threadDownloadBusy = true;
+            setThreadButtonsBusy(true);
+            pageDrawer.open();
+
+            const kindLabel = kind === 'image' ? 'photos' : kind === 'video' ? 'videos' : 'photos and videos';
+            const threadSettings = xfpdLoadUiSettings();
+            let batchTaskId = null;
+
+            try {
+                showThreadStatus(`Preparing ${kindLabel} from the entire thread…`);
+                await xfpdPreparePerformerFolder(threadSettings, threadProgressUi.statusText);
+
+                const collected = await xfpdCollectThreadMedia(({ pageNumber, lastPage, entries }) => {
+                    showThreadStatus(`Scanning page ${pageNumber} of ${lastPage}  •  ${entries} media post${entries === 1 ? '' : 's'} found`);
+                });
+                const entries = xfpdThreadEntriesForMedia(collected.entries, kind);
+                const rawFileCount = entries.reduce(
+                    (total, entry) => total + entry.hosts.reduce((count, host) => count + host.resources.length, 0),
+                    0,
+                );
+
+                if (!entries.length || !rawFileCount) {
+                    showThreadStatus(`No ${kindLabel} were found across ${collected.pagesScanned} page${collected.pagesScanned === 1 ? '' : 's'}.`, '#e8a838');
+                    return;
+                }
+
+                batchTaskId = `thread:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+                xfpdGlobalProgress.begin(batchTaskId, 0);
+                let completedPosts = 0;
+                let completedFiles = 0;
+                let resolvedFiles = 0;
+                let failedPosts = 0;
+
+                for (let index = 0; index < entries.length; index++) {
+                    const entry = entries[index];
+                    showThreadStatus(
+                        `Downloading ${kindLabel}: post ${index + 1} of ${entries.length}  •  page ${entry.parsedPost.pageNumber}`,
+                    );
+                    try {
+                        await downloadPost(
+                            entry.parsedPost,
+                            entry.hosts,
+                            hostsForPost => hostsForPost.filter(host => host.enabled),
+                            resolvers,
+                            () => ({ ...threadSettings, _xfpdMediaFilter: kind }),
+                            threadDownloadStatusUi,
+                            {
+                                onComplete: (total, completed) => {
+                                    resolvedFiles += total;
+                                    completedFiles += completed;
+                                },
+                            },
+                        );
+                        completedPosts++;
+                    } catch (e) {
+                        failedPosts++;
+                        console.error(`[XFPD] Entire-thread download failed for post ${entry.parsedPost.postId}.`, e);
+                    }
+                }
+
+                const problems = [];
+                if (collected.failedPages.length) problems.push(`${collected.failedPages.length} page${collected.failedPages.length === 1 ? '' : 's'} could not be scanned`);
+                if (failedPosts) problems.push(`${failedPosts} post${failedPosts === 1 ? '' : 's'} failed`);
+                const suffix = problems.length ? `  •  ${problems.join('  •  ')}` : '';
+                const statusColor = problems.length ? '#e8a838' : '#47ba24';
+                showThreadStatus(
+                    `Complete: ${completedFiles} of ${resolvedFiles} ${kindLabel} from ${completedPosts} posts across ${collected.pagesScanned} pages${suffix}`,
+                    statusColor,
+                );
+            } catch (e) {
+                console.error('[XFPD] Entire-thread scan failed.', e);
+                showThreadStatus(`Could not scan the entire thread: ${e?.message || 'unknown error'}`, '#ff8f84');
+            } finally {
+                if (batchTaskId) xfpdGlobalProgress.finish(batchTaskId);
+                threadDownloadBusy = false;
+                setThreadButtonsBusy(false);
+            }
+        };
+
+        document.getElementById('xfpd-thread-images')?.addEventListener('click', () => void startThreadMedia('image'));
+        document.getElementById('xfpd-thread-videos')?.addEventListener('click', () => void startThreadMedia('video'));
+        document.getElementById('xfpd-thread-both')?.addEventListener('click', () => void startThreadMedia('both'));
+        btnDownloadThread.addEventListener('click', e => {
+            e.preventDefault();
+            pageDrawer.open();
+            document.getElementById('xfpd-thread-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        });
+
         const postsWithMedia = parsedPosts.filter(p => p.parsedHosts.length);
         if (postsWithMedia.length > 0) {
             const btnDownloadPage = addDownloadPageButton(postsWithMedia.length);
@@ -6594,7 +6923,7 @@ const xfpdCreatePageDrawer = () => {
             if (drawerVideos) drawerVideos.textContent = `All videos (${videoCount})`;
             const list = document.getElementById('xfpd-drawer-list');
             const fab = document.getElementById('xfpd-page-fab');
-            if (fab) fab.innerHTML = `<span class="xfpd-fab-dot"></span> Download page · ${postsWithMedia.length}`;
+            if (fab) fab.innerHTML = `<span class="xfpd-fab-dot"></span> Download media · ${threadPageCount} page${threadPageCount === 1 ? '' : 's'}`;
 
             postsWithMedia.forEach(post => {
                 const { postId, postNumber, textContent, contentContainer } = post.parsedPost;
@@ -6706,8 +7035,10 @@ const xfpdCreatePageDrawer = () => {
                 pageDrawer.open();
             });
             refreshSelectedMeta();
-        } else {
+        } else if (threadPageCount <= 1) {
             pageDrawer.fab.style.display = 'none';
+        } else {
+            pageDrawer.fab.innerHTML = `<span class="xfpd-fab-dot"></span> Download thread · ${threadPageCount} pages`;
         }
     };
 

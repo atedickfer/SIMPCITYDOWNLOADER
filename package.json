@@ -1,6 +1,6 @@
 {
   "name": "simpcity-downloader-userscript",
-  "version": "4.3.2",
+  "version": "4.4.0",
   "private": true,
   "description": "Validation scripts for $IMPC!TYDOWNLOADER",
   "scripts": {

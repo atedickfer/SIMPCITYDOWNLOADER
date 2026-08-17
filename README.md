@@ -1,6 +1,6 @@
 # $IMPC!TYDOWNLOADER
 
-[![Userscript version](https://img.shields.io/badge/userscript-v4.3.2-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
+[![Userscript version](https://img.shields.io/badge/userscript-v4.4.0-3db7c7)](dist/%24IMPC%21TYDOWNLOADER.user.js)
 [![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue.svg)](LICENSE)
 [![Validation](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml/badge.svg)](https://github.com/atedickfer/SIMPCITYDOWNLOADER/actions/workflows/validate.yml)
 
@@ -14,6 +14,7 @@ A Tampermonkey userscript for downloading images, videos, attachments, albums, a
 
 - Download an individual post or batch selected posts from the current page.
 - Dedicated **Download all images** and **Download all videos** actions.
+- Entire-thread **All photos**, **All videos**, and **Photos + videos** actions across every pagination page.
 - Create a real folder named after the performer on Chromium browsers.
 - Portable performer-rooted ZIP fallback on browsers without directory access.
 - ZIP or unzipped output, nested album folders, flattening, and duplicate removal.
@@ -44,6 +45,10 @@ Click **Download (x/x)** beside a post. Use the gear button to choose ZIP mode, 
 Use **Download page** to select specific posts, or use **Download all images** / **Download all videos** for immediate media-type batches.
 
 ![Page download drawer](output/playwright/page-download.png)
+
+### Download an entire performer thread
+
+Click **Entire thread** near the thread title, then choose **All photos**, **All videos**, or **Photos + videos**. The downloader scans every numbered XenForo page with your signed-in session, removes duplicate posts and media links, and processes posts sequentially to avoid overwhelming the browser.
 
 ### Track the whole batch
 
