@@ -1,0 +1,10 @@
+{
+  "name": "simpcity-downloader-userscript",
+  "version": "4.3.0",
+  "private": true,
+  "description": "Validation scripts for $IMPC!TYDOWNLOADER",
+  "scripts": {
+    "test": "node --check 'dist/$IMPC!TYDOWNLOADER.user.js' && node scripts/verify-userscript.mjs"
+  },
+  "license": "WTFPL"
+}

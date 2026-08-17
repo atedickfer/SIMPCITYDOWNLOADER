@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible downloader or resolver problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Edge
+        - Firefox
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: manager
+    attributes:
+      label: Userscript manager and version
+      placeholder: Tampermonkey 5.x
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: $IMPC!TYDOWNLOADER version
+      placeholder: 4.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Do not include private links, tokens, cookies, or credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: text
